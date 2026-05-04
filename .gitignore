@@ -1,0 +1,9 @@
+models/*.pt
+models/*.onnx
+models/*.engine
+!models/.gitkeep
+.venv/
+__pycache__/
+*.pyc
+
+volumes/
