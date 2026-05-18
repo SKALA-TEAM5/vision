@@ -1,4 +1,7 @@
+import re
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
@@ -74,6 +77,15 @@ async def detect_source(request: SourceDetectionRequest) -> DetectionResponse:
 
     response.source_id = request.source_id
     response.source_uri = request.source_uri
+    output_path = _annotated_output_path(request, "combined")
+    save_annotated_image(
+        image,
+        response.detections,
+        output_path,
+        response.safety_net_review,
+    )
+    response.annotated_image_path = str(output_path)
+    response.annotated_image_url = _annotated_image_url(output_path)
     return response
 
 
@@ -104,6 +116,10 @@ async def detect_ppe_source(request: SourceDetectionRequest) -> PpeDetectionResp
 
     response.source_id = request.source_id
     response.source_uri = request.source_uri
+    output_path = _annotated_output_path(request, "ppe")
+    save_annotated_image(image, response.detections, output_path)
+    response.annotated_image_path = str(output_path)
+    response.annotated_image_url = _annotated_image_url(output_path)
     return response
 
 
@@ -112,9 +128,15 @@ async def detect_safety_net(file: UploadFile = File(...)) -> SafetyNetDetectionR
     image = await _load_upload_image(file)
 
     try:
-        return vision_service.detect_safety_net(image)
+        response = vision_service.detect_safety_net(image)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    output_path = settings.output_dir / "annotated" / f"{file.filename or 'uploaded'}.safety-net.annotated.jpg"
+    save_annotated_image(image, [], output_path, response.safety_net_review)
+    response.annotated_image_path = str(output_path)
+    response.annotated_image_url = _annotated_image_url(output_path)
+    return response
 
 
 @app.post("/detect/safety-net/source", response_model=SafetyNetDetectionResponse)
@@ -128,6 +150,10 @@ async def detect_safety_net_source(request: SourceDetectionRequest) -> SafetyNet
 
     response.source_id = request.source_id
     response.source_uri = request.source_uri
+    output_path = _annotated_output_path(request, "safety-net")
+    save_annotated_image(image, [], output_path, response.safety_net_review)
+    response.annotated_image_path = str(output_path)
+    response.annotated_image_url = _annotated_image_url(output_path)
     return response
 
 
@@ -143,6 +169,25 @@ async def _load_upload_image(file: UploadFile):
 
 def _load_source_image(source_uri: str):
     try:
-        return load_rgb_image_from_uri(source_uri)
+        return load_rgb_image_from_uri(source_uri, settings.input_dir)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _annotated_output_path(request: SourceDetectionRequest, result_type: str) -> Path:
+    base_name = request.source_id or _source_name(request.source_uri)
+    safe_name = re.sub(r"[^0-9A-Za-z가-힣_.-]+", "_", base_name).strip("._")
+    if not safe_name:
+        safe_name = "uploaded"
+    return settings.output_dir / "annotated" / f"{safe_name}.{result_type}.annotated.jpg"
+
+
+def _source_name(source_uri: str) -> str:
+    parsed = urlparse(source_uri)
+    if parsed.scheme in ("http", "https"):
+        return Path(parsed.path).stem
+    return Path(source_uri).stem
+
+
+def _annotated_image_url(output_path: Path) -> str:
+    return f"/vision-results/annotated/{output_path.name}"

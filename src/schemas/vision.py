@@ -61,6 +61,8 @@ class SafetyNetDetectionResponse(BaseModel):
     status: str
     is_appropriate: Optional[bool]
     message: str
+    annotated_image_path: Optional[str] = None
+    annotated_image_url: Optional[str] = None
     safety_net_review: SafetyNetReview
 
 

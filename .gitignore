@@ -3,6 +3,7 @@ models/*.onnx
 models/*.engine
 !models/.gitkeep
 .venv/
+.bentoml/
 __pycache__/
 *.pyc
 

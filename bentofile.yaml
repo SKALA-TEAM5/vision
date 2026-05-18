@@ -1,0 +1,27 @@
+service: "service:VisionService"
+
+include:
+  - "service.py"
+  - "src/**/*.py"
+  - "requirements.txt"
+
+python:
+  requirements_txt: "./requirements.txt"
+  lock_packages: false
+
+docker:
+  distro: debian
+  python_version: "3.11"
+  system_packages:
+    - libgl1
+    - libglib2.0-0
+
+envs:
+  - name: VISION_MODEL_PATH
+    value: /models/ppe-detector.pt
+  - name: SAFETY_NET_MODEL_PATH
+    value: /models/safety-net-classifier.pt
+  - name: VISION_INPUT_DIR
+    value: /data/files
+  - name: VISION_OUTPUT_DIR
+    value: /data/vision_results

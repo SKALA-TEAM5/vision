@@ -1,5 +1,6 @@
 import io
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -13,7 +14,7 @@ def load_rgb_image(image_bytes: bytes) -> Image.Image:
         raise ValueError("invalid image file") from exc
 
 
-def load_rgb_image_from_uri(source_uri: str) -> Image.Image:
+def load_rgb_image_from_uri(source_uri: str, base_dir: Optional[Path] = None) -> Image.Image:
     parsed = urlparse(source_uri)
 
     if parsed.scheme in ("http", "https"):
@@ -25,6 +26,9 @@ def load_rgb_image_from_uri(source_uri: str) -> Image.Image:
             raise ValueError(f"failed to read image url: {source_uri}") from exc
 
     path = Path(source_uri)
+    if not path.is_file() and base_dir is not None and not path.is_absolute():
+        path = base_dir / path.name
+
     if not path.is_file():
         raise ValueError(f"image file not found: {source_uri}")
 

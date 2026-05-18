@@ -11,6 +11,7 @@
 - 적정성 판단 로직
 - JSON 출력 스키마
 - 샘플 이미지 및 실험 예제
+- BentoML 기반 모델 서빙 설정
 
 현재 모델:
 
@@ -27,6 +28,7 @@
 출력:
 
 - 적정성 판단 결과 JSON
+- bbox 또는 상태 배너가 그려진 결과 이미지 경로/URL
 
 예시:
 
@@ -50,12 +52,25 @@
 - 보호구 점검: `POST /detect/ppe/source`
 - 안전망 점검: `POST /detect/safety-net/source`
 
+컨테이너 실행 기준으로 입력 이미지 디렉토리는 `/data/files`, 결과 이미지 디렉토리는 `/data/vision_results`입니다.
+백엔드는 DB에서 가져온 파일 위치를 `source_uri`로 전달합니다.
+
+```json
+{
+  "source_id": "image_12345",
+  "source_uri": "/data/files/raw_image_022__0009.jpg"
+}
+```
+
+백엔드는 Vision API 응답의 `annotated_image_path` 또는 `annotated_image_url`을 로그 테이블에 저장합니다.
+프론트는 DB에 저장된 결과 이미지 URL을 그대로 표시할 수 있습니다.
+
 안전망 classifier는 현재 `installed`, `missing`만 학습되어 있으므로 confidence가 낮은 경우 코드에서 `unclear`로 처리합니다.
 
 ## 디렉토리 원칙
 
 모든 구현 코드는 `src/` 아래에 둡니다.
-루트에는 프로젝트 설정 파일과 공통 문서만 둡니다.
+루트에는 프로젝트 설정 파일, BentoML entrypoint(`service.py`), 공통 문서만 둡니다.
 
 권장 구조:
 
@@ -72,6 +87,8 @@ src/
 examples/
 tests/
 docs/
+service.py
+bentofile.yaml
 ```
 
 ## 폴더 설명
