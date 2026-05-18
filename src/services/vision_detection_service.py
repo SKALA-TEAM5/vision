@@ -4,7 +4,14 @@ from typing import Any, Optional, Tuple
 from PIL import Image
 
 from src.core.config import Settings
-from src.schemas.vision import Detection, DetectionResponse, EquipmentReview
+from src.schemas.vision import (
+    Detection,
+    DetectionResponse,
+    EquipmentReview,
+    PpeDetectionResponse,
+    SafetyNetDetectionResponse,
+    SafetyNetReview,
+)
 
 
 class VisionDetectionService:
@@ -20,8 +27,69 @@ class VisionDetectionService:
 
         return YOLO(str(self.settings.model_path))
 
+    @lru_cache(maxsize=1)
+    def load_safety_net_model(self) -> Any:
+        if not self.settings.safety_net_model_path.is_file():
+            raise FileNotFoundError(f"model file not found: {self.settings.safety_net_model_path}")
+
+        from ultralytics import YOLO
+
+        return YOLO(str(self.settings.safety_net_model_path))
+
+    def detect_ppe(self, image: Image.Image) -> PpeDetectionResponse:
+        detections = self._detect_ppe_boxes(image)
+        reviews = self._build_reviews(detections)
+        status, is_appropriate, message = self._build_ppe_result(reviews)
+
+        return PpeDetectionResponse(
+            model_name=self.settings.model_name,
+            image_width=image.width,
+            image_height=image.height,
+            status=status,
+            is_appropriate=is_appropriate,
+            message=message,
+            reviews=reviews,
+            detections=detections,
+        )
+
+    def detect_safety_net(self, image: Image.Image) -> SafetyNetDetectionResponse:
+        review = self._classify_safety_net(image)
+        return SafetyNetDetectionResponse(
+            model_name=self.settings.safety_net_model_name,
+            image_width=image.width,
+            image_height=image.height,
+            status=review.status,
+            is_appropriate=review.is_appropriate,
+            message=review.reason,
+            safety_net_review=review,
+        )
+
     def detect(self, image: Image.Image) -> DetectionResponse:
-        model = self.load_model()
+        ppe_response = self.detect_ppe(image)
+        safety_net_response = self.detect_safety_net(image)
+        overall_status, is_appropriate, message = self._build_overall_result(
+            ppe_response.status,
+            ppe_response.is_appropriate,
+            ppe_response.message,
+            safety_net_response.safety_net_review,
+        )
+
+        return DetectionResponse(
+            model_name=self.settings.model_name,
+            image_width=image.width,
+            image_height=image.height,
+            overall_status=overall_status,
+            is_appropriate=is_appropriate,
+            message=message,
+            ppe_status=ppe_response.status,
+            ppe_is_appropriate=ppe_response.is_appropriate,
+            ppe_message=ppe_response.message,
+            safety_net_review=safety_net_response.safety_net_review,
+            reviews=ppe_response.reviews,
+            detections=ppe_response.detections,
+        )
+
+    def _detect_ppe_boxes(self, image: Image.Image) -> list[Detection]:
         predict_kwargs: dict[str, Any] = {
             "conf": self.settings.model_conf,
             "iou": self.settings.model_iou,
@@ -31,6 +99,7 @@ class VisionDetectionService:
         if self.settings.model_device != "auto":
             predict_kwargs["device"] = self.settings.model_device
 
+        model = self.load_model()
         results = model.predict(image, **predict_kwargs)
         boxes = results[0].boxes
         detections: list[Detection] = []
@@ -61,18 +130,7 @@ class VisionDetectionService:
                     )
                 )
 
-        reviews = self._build_reviews(detections)
-        overall_status, is_appropriate, message = self._build_overall_result(reviews)
-        return DetectionResponse(
-            model_name=self.settings.model_name,
-            image_width=image.width,
-            image_height=image.height,
-            overall_status=overall_status,
-            is_appropriate=is_appropriate,
-            message=message,
-            reviews=reviews,
-            detections=detections,
-        )
+        return detections
 
     def _build_reviews(self, detections: list[Detection]) -> list[EquipmentReview]:
         reviews: list[EquipmentReview] = []
@@ -143,7 +201,68 @@ class VisionDetectionService:
 
         return reviews
 
-    def _build_overall_result(
+    def _classify_safety_net(self, image: Image.Image) -> SafetyNetReview:
+        model = self.load_safety_net_model()
+        predict_kwargs: dict[str, Any] = {"verbose": False}
+        if self.settings.model_device != "auto":
+            predict_kwargs["device"] = self.settings.model_device
+
+        result = model.predict(image, **predict_kwargs)[0]
+        probs = result.probs
+        if probs is None:
+            return SafetyNetReview(
+                model_name=self.settings.safety_net_model_name,
+                status="unclear",
+                is_appropriate=None,
+                confidence=None,
+                raw_label=None,
+                reason="안전망 설치 여부를 판단하기 어렵습니다.",
+            )
+
+        class_id = int(probs.top1)
+        confidence = round(float(probs.top1conf), 4)
+        raw_label = str(model.names.get(class_id, class_id))
+
+        if confidence < self.settings.safety_net_confidence_threshold:
+            return SafetyNetReview(
+                model_name=self.settings.safety_net_model_name,
+                status="unclear",
+                is_appropriate=None,
+                confidence=confidence,
+                raw_label=raw_label,
+                reason="이 사진에서는 안전망 설치 여부를 판단하기 어렵습니다.",
+            )
+
+        if raw_label == "installed":
+            return SafetyNetReview(
+                model_name=self.settings.safety_net_model_name,
+                status="installed",
+                is_appropriate=True,
+                confidence=confidence,
+                raw_label=raw_label,
+                reason="안전망 설치 상태로 판단되었습니다.",
+            )
+
+        if raw_label == "missing":
+            return SafetyNetReview(
+                model_name=self.settings.safety_net_model_name,
+                status="missing",
+                is_appropriate=False,
+                confidence=confidence,
+                raw_label=raw_label,
+                reason="안전망 미설치 상태로 판단되어 부적정입니다.",
+            )
+
+        return SafetyNetReview(
+            model_name=self.settings.safety_net_model_name,
+            status="unclear",
+            is_appropriate=None,
+            confidence=confidence,
+            raw_label=raw_label,
+            reason="이 사진에서는 안전망 설치 여부를 판단하기 어렵습니다.",
+        )
+
+    def _build_ppe_result(
         self, reviews: list[EquipmentReview]
     ) -> Tuple[str, Optional[bool], str]:
         not_wearing = [review for review in reviews if review.is_appropriate is False]
@@ -158,6 +277,38 @@ class VisionDetectionService:
             return "needs_review", None, f"{labels} 항목은 검토가 필요합니다."
 
         return "appropriate", True, "안전모, 안전화, 안전벨트가 모두 적정으로 판단되었습니다."
+
+    def _build_overall_result(
+        self,
+        ppe_status: str,
+        ppe_is_appropriate: Optional[bool],
+        ppe_message: str,
+        safety_net_review: SafetyNetReview,
+    ) -> Tuple[str, Optional[bool], str]:
+        failed_messages: list[str] = []
+        review_messages: list[str] = []
+
+        if ppe_is_appropriate is False:
+            failed_messages.append(ppe_message)
+        elif ppe_is_appropriate is None:
+            review_messages.append(ppe_message)
+
+        if safety_net_review.is_appropriate is False:
+            failed_messages.append(safety_net_review.reason)
+        elif safety_net_review.is_appropriate is None:
+            review_messages.append(safety_net_review.reason)
+
+        if failed_messages:
+            return "not_appropriate", False, " ".join(failed_messages)
+
+        if review_messages:
+            return "needs_review", None, " ".join(review_messages)
+
+        return (
+            "appropriate",
+            True,
+            "보호구 착용 상태와 안전망 설치 상태가 모두 적정으로 판단되었습니다.",
+        )
 
     def _box_color(self, is_wearing: object, needs_review: bool) -> str:
         if needs_review:

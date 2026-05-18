@@ -6,12 +6,15 @@ from typing import Union
 
 @dataclass(frozen=True)
 class Settings:
-    model_path: Path = Path(os.getenv("VISION_MODEL_PATH", "vision/models/best.pt"))
-    model_name: str = os.getenv("VISION_MODEL_NAME", "yolo11s-0504")
+    model_path: Path = Path(os.getenv("VISION_MODEL_PATH", "vision/models/ppe-detector.pt"))
+    safety_net_model_path: Path = Path(os.getenv("SAFETY_NET_MODEL_PATH", "vision/models/safety-net-classifier.pt"))
+    model_name: str = os.getenv("VISION_MODEL_NAME", "ppe-detector")
+    safety_net_model_name: str = os.getenv("SAFETY_NET_MODEL_NAME", "safety-net-classifier")
     model_conf: float = float(os.getenv("VISION_MODEL_CONF", "0.35"))
     model_iou: float = float(os.getenv("VISION_MODEL_IOU", "0.45"))
     model_device: str = os.getenv("VISION_MODEL_DEVICE", "auto")
     review_confidence_threshold: float = float(os.getenv("VISION_REVIEW_CONF", "0.50"))
+    safety_net_confidence_threshold: float = float(os.getenv("SAFETY_NET_REVIEW_CONF", "0.70"))
     input_dir: Path = Path(os.getenv("VISION_INPUT_DIR", "volumes/files"))
     output_dir: Path = Path(os.getenv("VISION_OUTPUT_DIR", "volumes/vision_results"))
     class_names: dict[int, str] = field(

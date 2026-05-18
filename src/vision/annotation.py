@@ -3,7 +3,9 @@ from typing import Union
 
 from PIL import Image, ImageDraw, ImageFont
 
-from src.schemas.vision import Detection
+from typing import Optional
+
+from src.schemas.vision import Detection, SafetyNetReview
 
 
 BOX_COLORS = {
@@ -34,6 +36,7 @@ def save_annotated_image(
     image: Image.Image,
     detections: list[Detection],
     output_path: Path,
+    safety_net_review: Optional[SafetyNetReview] = None,
 ) -> None:
     annotated = image.copy()
     draw = ImageDraw.Draw(annotated)
@@ -42,6 +45,16 @@ def save_annotated_image(
     padding_x = max(10, line_width * 2)
     padding_y = max(8, line_width)
     placed_labels: list[tuple[float, float, float, float]] = []
+
+    if safety_net_review is not None:
+        _draw_safety_net_banner(
+            image=annotated,
+            draw=draw,
+            font=font,
+            review=safety_net_review,
+            padding_x=padding_x,
+            padding_y=padding_y,
+        )
 
     for detection in detections:
         color = BOX_COLORS.get(detection.box_color, (107, 114, 128))
@@ -94,6 +107,49 @@ def save_annotated_image(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     annotated.save(output_path)
+
+
+def _draw_safety_net_banner(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    font: Union[ImageFont.FreeTypeFont, ImageFont.ImageFont],
+    review: SafetyNetReview,
+    padding_x: int,
+    padding_y: int,
+) -> None:
+    color = _safety_net_color(review.status)
+    text = _safety_net_text(review)
+    left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+    text_width = right - left
+    text_height = bottom - top
+    margin = max(12, min(image.width, image.height) // 90)
+    banner_width = min(image.width - margin * 2, text_width + padding_x * 2)
+    banner_height = text_height + padding_y * 2
+
+    x1 = margin
+    y1 = margin
+    x2 = x1 + banner_width
+    y2 = y1 + banner_height
+
+    draw.rounded_rectangle((x1, y1, x2, y2), radius=max(8, margin // 2), fill=color)
+    draw.text((x1 + padding_x, y1 + padding_y), text, fill=(255, 255, 255), font=font)
+
+
+def _safety_net_color(status: str) -> tuple[int, int, int]:
+    if status == "missing":
+        return BOX_COLORS["red"]
+    if status == "unclear":
+        return BOX_COLORS["yellow"]
+    return BOX_COLORS["blue"]
+
+
+def _safety_net_text(review: SafetyNetReview) -> str:
+    confidence = f" {review.confidence:.2f}" if review.confidence is not None else ""
+    if review.status == "installed":
+        return f"안전망 설치됨{confidence}"
+    if review.status == "missing":
+        return f"안전망 미설치{confidence}"
+    return f"안전망 판단 어려움{confidence}"
 
 
 def _overlaps(

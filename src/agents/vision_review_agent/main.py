@@ -34,7 +34,12 @@ def review_images(input_dir: Path, output_dir: Path) -> dict:
         image = load_rgb_image(image_path.read_bytes())
         response = service.detect(image)
         annotated_path = output_dir / "annotated" / f"{image_path.stem}.annotated.jpg"
-        save_annotated_image(image, response.detections, annotated_path)
+        save_annotated_image(
+            image,
+            response.detections,
+            annotated_path,
+            response.safety_net_review,
+        )
         response.annotated_image_path = str(annotated_path)
         response.annotated_image_url = f"/vision-results/annotated/{annotated_path.name}"
         result = {

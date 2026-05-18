@@ -12,11 +12,17 @@
 - JSON 출력 스키마
 - 샘플 이미지 및 실험 예제
 
+현재 모델:
+
+- `models/ppe-detector.pt`: 안전모, 안전화, 안전벨트 착용/미착용 bbox detector
+- `models/safety-net-classifier.pt`: 안전망 설치 여부 classifier
+
 ## 입력 / 출력
 
 입력:
 
-- 사진 파일 1장 또는 여러 장
+- 보호구 점검 사진 파일 또는 파일 주소
+- 안전망 점검 사진 파일 또는 파일 주소
 
 출력:
 
@@ -26,11 +32,25 @@
 
 ```json
 {
-  "is_appropriate": true,
-  "confidence": 0.92,
-  "reason": "안전모가 정상 착용 상태로 확인됨"
+  "overall_status": "needs_review",
+  "is_appropriate": null,
+  "message": "안전화 항목은 검토가 필요합니다.",
+  "ppe_status": "needs_review",
+  "safety_net_review": {
+    "status": "unclear",
+    "is_appropriate": null,
+    "confidence": 0.54,
+    "reason": "이 사진에서는 안전망 설치 여부를 판단하기 어렵습니다."
+  }
 }
 ```
+
+운영 API에서는 사진 업로드 시 선택된 점검 항목에 따라 모델을 따로 실행합니다.
+
+- 보호구 점검: `POST /detect/ppe/source`
+- 안전망 점검: `POST /detect/safety-net/source`
+
+안전망 classifier는 현재 `installed`, `missing`만 학습되어 있으므로 confidence가 낮은 경우 코드에서 `unclear`로 처리합니다.
 
 ## 디렉토리 원칙
 

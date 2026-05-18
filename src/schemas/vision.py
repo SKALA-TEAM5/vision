@@ -23,13 +23,60 @@ class EquipmentReview(BaseModel):
     reason: str
 
 
+class SafetyNetReview(BaseModel):
+    model_name: str
+    status: str
+    is_appropriate: Optional[bool]
+    confidence: Optional[float]
+    reason: str
+    raw_label: Optional[str] = None
+
+
+class SourceDetectionRequest(BaseModel):
+    source_uri: str
+    source_id: Optional[str] = None
+
+
+class PpeDetectionResponse(BaseModel):
+    source_id: Optional[str] = None
+    source_uri: Optional[str] = None
+    model_name: str
+    image_width: int
+    image_height: int
+    status: str
+    is_appropriate: Optional[bool]
+    message: str
+    annotated_image_path: Optional[str] = None
+    annotated_image_url: Optional[str] = None
+    reviews: list[EquipmentReview]
+    detections: list[Detection]
+
+
+class SafetyNetDetectionResponse(BaseModel):
+    source_id: Optional[str] = None
+    source_uri: Optional[str] = None
+    model_name: str
+    image_width: int
+    image_height: int
+    status: str
+    is_appropriate: Optional[bool]
+    message: str
+    safety_net_review: SafetyNetReview
+
+
 class DetectionResponse(BaseModel):
+    source_id: Optional[str] = None
+    source_uri: Optional[str] = None
     model_name: str
     image_width: int
     image_height: int
     overall_status: str
     is_appropriate: Optional[bool]
     message: str
+    ppe_status: str
+    ppe_is_appropriate: Optional[bool]
+    ppe_message: str
+    safety_net_review: SafetyNetReview
     annotated_image_path: Optional[str] = None
     annotated_image_url: Optional[str] = None
     reviews: list[EquipmentReview]
