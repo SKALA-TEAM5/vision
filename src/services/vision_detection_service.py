@@ -138,14 +138,15 @@ class VisionDetectionService:
         for equipment in ("safety_helmet", "safety_shoes", "safety_belt"):
             matches = [detection for detection in detections if detection.equipment == equipment]
             if not matches:
+                equipment_label = self.settings.equipment_labels[equipment]
                 reviews.append(
                     EquipmentReview(
                         equipment=equipment,
-                        equipment_label=self.settings.equipment_labels[equipment],
+                        equipment_label=equipment_label,
                         status="unknown",
                         is_appropriate=None,
                         confidence=None,
-                        reason="관련 객체가 탐지되지 않았습니다.",
+                        reason=f"{equipment_label} 항목이 확인되지 않았습니다.",
                     )
                 )
                 continue
@@ -165,37 +166,42 @@ class VisionDetectionService:
                 )
                 continue
 
-            valid_wearing_matches = [
+            needs_review_matches = [
                 detection
                 for detection in matches
-                if detection.is_wearing is True and not detection.needs_review
+                if detection.needs_review
             ]
-            if valid_wearing_matches:
-                best = max(valid_wearing_matches, key=lambda detection: detection.confidence)
+            if needs_review_matches:
+                best = max(needs_review_matches, key=lambda detection: detection.confidence)
                 reviews.append(
                     EquipmentReview(
                         equipment=equipment,
                         equipment_label=self.settings.equipment_labels[equipment],
-                        status="wearing",
-                        is_appropriate=True,
+                        status="needs_review",
+                        is_appropriate=None,
                         confidence=best.confidence,
-                        reason=f"{best.label} 탐지 결과를 기준으로 판단했습니다.",
+                        reason=(
+                            f"{best.label} confidence가 "
+                            f"{self.settings.review_confidence_threshold:.2f} 미만이라 검토가 필요합니다."
+                        ),
                     )
                 )
                 continue
 
-            best = max(matches, key=lambda detection: detection.confidence)
+            valid_wearing_matches = [
+                detection
+                for detection in matches
+                if detection.is_wearing is True
+            ]
+            best = max(valid_wearing_matches, key=lambda detection: detection.confidence)
             reviews.append(
                 EquipmentReview(
                     equipment=equipment,
                     equipment_label=self.settings.equipment_labels[equipment],
-                    status="needs_review",
-                    is_appropriate=None,
+                    status="wearing",
+                    is_appropriate=True,
                     confidence=best.confidence,
-                    reason=(
-                        f"{best.label} confidence가 "
-                        f"{self.settings.review_confidence_threshold:.2f} 미만이라 검토가 필요합니다."
-                    ),
+                    reason=f"{best.label} 탐지 결과를 기준으로 판단했습니다.",
                 )
             )
 
@@ -265,16 +271,28 @@ class VisionDetectionService:
     def _build_ppe_result(
         self, reviews: list[EquipmentReview]
     ) -> Tuple[str, Optional[bool], str]:
-        not_wearing = [review for review in reviews if review.is_appropriate is False]
-        unknown = [review for review in reviews if review.is_appropriate is None]
+        not_wearing = [review for review in reviews if review.status == "not_wearing"]
+        needs_review = [review for review in reviews if review.status == "needs_review"]
+        unknown = [review for review in reviews if review.status == "unknown"]
+        messages: list[str] = []
 
         if not_wearing:
             labels = ", ".join(review.equipment_label for review in not_wearing)
-            return "not_appropriate", False, f"{labels} 항목이 부적정으로 판단되었습니다."
+            messages.append(f"{labels} 항목이 부적정으로 판단되었습니다.")
+
+        if needs_review:
+            labels = ", ".join(review.equipment_label for review in needs_review)
+            messages.append(f"{labels} 항목은 검토가 필요합니다.")
 
         if unknown:
             labels = ", ".join(review.equipment_label for review in unknown)
-            return "needs_review", None, f"{labels} 항목은 검토가 필요합니다."
+            messages.append(f"{labels} 항목이 확인되지 않았습니다.")
+
+        if not_wearing:
+            return "not_appropriate", False, " ".join(messages)
+
+        if needs_review or unknown:
+            return "needs_review", None, " ".join(messages)
 
         return "appropriate", True, "안전모, 안전화, 안전벨트가 모두 적정으로 판단되었습니다."
 

@@ -22,6 +22,7 @@ app = FastAPI(title="Safety Vision API", version="0.1.0")
 vision_service = VisionDetectionService(settings)
 settings.output_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/vision-results", StaticFiles(directory=str(settings.output_dir)), name="vision-results")
+app.mount("/vision-files", StaticFiles(directory=str(settings.input_dir)), name="vision-files")
 
 
 @app.get("/health")
@@ -77,6 +78,7 @@ async def detect_source(request: SourceDetectionRequest) -> DetectionResponse:
 
     response.source_id = request.source_id
     response.source_uri = request.source_uri
+    response.source_image_url = _source_image_url(request.source_uri)
     output_path = _annotated_output_path(request, "combined")
     save_annotated_image(
         image,
@@ -98,10 +100,6 @@ async def detect_ppe(file: UploadFile = File(...)) -> PpeDetectionResponse:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    output_path = _upload_annotated_output_path(file.filename, "ppe")
-    save_annotated_image(image, response.detections, output_path)
-    response.annotated_image_path = str(output_path)
-    response.annotated_image_url = _annotated_image_url(output_path)
     return response
 
 
@@ -116,10 +114,7 @@ async def detect_ppe_source(request: SourceDetectionRequest) -> PpeDetectionResp
 
     response.source_id = request.source_id
     response.source_uri = request.source_uri
-    output_path = _annotated_output_path(request, "ppe")
-    save_annotated_image(image, response.detections, output_path)
-    response.annotated_image_path = str(output_path)
-    response.annotated_image_url = _annotated_image_url(output_path)
+    response.source_image_url = _source_image_url(request.source_uri)
     return response
 
 
@@ -150,6 +145,7 @@ async def detect_safety_net_source(request: SourceDetectionRequest) -> SafetyNet
 
     response.source_id = request.source_id
     response.source_uri = request.source_uri
+    response.source_image_url = _source_image_url(request.source_uri)
     output_path = _annotated_output_path(request, "safety-net")
     save_annotated_image(image, [], output_path, response.safety_net_review)
     response.annotated_image_path = str(output_path)
@@ -200,3 +196,10 @@ def _source_name(source_uri: str) -> str:
 def _annotated_image_url(output_path: Path) -> str:
     relative_path = output_path.relative_to(settings.output_dir)
     return f"/vision-results/{relative_path.as_posix()}"
+
+
+def _source_image_url(source_uri: str) -> str:
+    parsed = urlparse(source_uri)
+    if parsed.scheme in ("http", "https"):
+        return source_uri
+    return f"/vision-files/{Path(source_uri).name}"

@@ -40,6 +40,7 @@ class SourceDetectionRequest(BaseModel):
 class PpeDetectionResponse(BaseModel):
     source_id: Optional[str] = None
     source_uri: Optional[str] = None
+    source_image_url: Optional[str] = None
     model_name: str
     image_width: int
     image_height: int
@@ -55,6 +56,7 @@ class PpeDetectionResponse(BaseModel):
 class SafetyNetDetectionResponse(BaseModel):
     source_id: Optional[str] = None
     source_uri: Optional[str] = None
+    source_image_url: Optional[str] = None
     model_name: str
     image_width: int
     image_height: int
@@ -69,6 +71,7 @@ class SafetyNetDetectionResponse(BaseModel):
 class DetectionResponse(BaseModel):
     source_id: Optional[str] = None
     source_uri: Optional[str] = None
+    source_image_url: Optional[str] = None
     model_name: str
     image_width: int
     image_height: int

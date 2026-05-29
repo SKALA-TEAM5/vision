@@ -19,6 +19,7 @@ def iter_image_paths(input_dir: Path) -> list[Path]:
         path
         for path in input_dir.rglob("*")
         if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+        and not path.stem.endswith("-test")
     )
 
 
@@ -49,15 +50,17 @@ def review_images(
         image_task = task_by_file[image_path.name]
         if image_task == "ppe":
             response = service.detect_ppe(image)
-            annotated_path = output_dir / "annotated" / "ppe" / f"{image_path.stem}.annotated.jpg"
-            save_annotated_image(image, response.detections, annotated_path)
+            annotated_path = None
         else:
             response = service.detect_safety_net(image)
             annotated_path = output_dir / "annotated" / "safety-net" / f"{image_path.stem}.annotated.jpg"
             save_annotated_image(image, [], annotated_path, response.safety_net_review)
 
-        response.annotated_image_path = str(annotated_path)
-        response.annotated_image_url = f"/vision-results/annotated/{image_task}/{annotated_path.name}"
+        response.source_uri = str(image_path)
+        response.source_image_url = f"/vision-files/{image_path.name}"
+        if annotated_path is not None:
+            response.annotated_image_path = str(annotated_path)
+            response.annotated_image_url = f"/vision-results/annotated/{image_task}/{annotated_path.name}"
         result = {
             "source_file": str(image_path),
             "task": image_task,

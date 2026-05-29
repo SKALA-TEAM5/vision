@@ -157,9 +157,11 @@ def _draw_safety_net_banner(
     y1 = margin
     x2 = x1 + banner_width
     y2 = y1 + banner_height
+    text_x = x1 + padding_x - left
+    text_y = y1 + (banner_height - text_height) / 2 - top
 
     draw.rounded_rectangle((x1, y1, x2, y2), radius=max(8, margin // 2), fill=color)
-    draw.text((x1 + padding_x, y1 + padding_y), text, fill=(255, 255, 255), font=font)
+    draw.text((text_x, text_y), text, fill=(255, 255, 255), font=font)
 
 
 def _safety_net_color(status: str) -> tuple[int, int, int]:
