@@ -15,7 +15,7 @@ WORKDIR /app
 COPY --from=ghcr.io/astral-sh/uv:0.11.14 /uv /uvx /bin/
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
+    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 fonts-noto-cjk fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml uv.lock ./

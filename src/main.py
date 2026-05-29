@@ -54,7 +54,7 @@ async def detect(file: UploadFile = File(...)) -> DetectionResponse:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    output_path = settings.output_dir / "annotated" / f"{file.filename or 'uploaded'}.annotated.jpg"
+    output_path = _upload_annotated_output_path(file.filename, "combined")
     save_annotated_image(
         image,
         response.detections,
@@ -62,7 +62,7 @@ async def detect(file: UploadFile = File(...)) -> DetectionResponse:
         response.safety_net_review,
     )
     response.annotated_image_path = str(output_path)
-    response.annotated_image_url = f"/vision-results/annotated/{output_path.name}"
+    response.annotated_image_url = _annotated_image_url(output_path)
     return response
 
 
@@ -98,10 +98,10 @@ async def detect_ppe(file: UploadFile = File(...)) -> PpeDetectionResponse:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    output_path = settings.output_dir / "annotated" / f"{file.filename or 'uploaded'}.ppe.annotated.jpg"
+    output_path = _upload_annotated_output_path(file.filename, "ppe")
     save_annotated_image(image, response.detections, output_path)
     response.annotated_image_path = str(output_path)
-    response.annotated_image_url = f"/vision-results/annotated/{output_path.name}"
+    response.annotated_image_url = _annotated_image_url(output_path)
     return response
 
 
@@ -132,7 +132,7 @@ async def detect_safety_net(file: UploadFile = File(...)) -> SafetyNetDetectionR
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    output_path = settings.output_dir / "annotated" / f"{file.filename or 'uploaded'}.safety-net.annotated.jpg"
+    output_path = _upload_annotated_output_path(file.filename, "safety-net")
     save_annotated_image(image, [], output_path, response.safety_net_review)
     response.annotated_image_path = str(output_path)
     response.annotated_image_url = _annotated_image_url(output_path)
@@ -176,10 +176,18 @@ def _load_source_image(source_uri: str):
 
 def _annotated_output_path(request: SourceDetectionRequest, result_type: str) -> Path:
     base_name = request.source_id or _source_name(request.source_uri)
+    return _named_annotated_output_path(base_name, result_type)
+
+
+def _upload_annotated_output_path(filename: str | None, result_type: str) -> Path:
+    return _named_annotated_output_path(Path(filename or "uploaded").stem, result_type)
+
+
+def _named_annotated_output_path(base_name: str, result_type: str) -> Path:
     safe_name = re.sub(r"[^0-9A-Za-z가-힣_.-]+", "_", base_name).strip("._")
     if not safe_name:
         safe_name = "uploaded"
-    return settings.output_dir / "annotated" / f"{safe_name}.{result_type}.annotated.jpg"
+    return settings.output_dir / "annotated" / result_type / f"{safe_name}.annotated.jpg"
 
 
 def _source_name(source_uri: str) -> str:
@@ -190,4 +198,5 @@ def _source_name(source_uri: str) -> str:
 
 
 def _annotated_image_url(output_path: Path) -> str:
-    return f"/vision-results/annotated/{output_path.name}"
+    relative_path = output_path.relative_to(settings.output_dir)
+    return f"/vision-results/{relative_path.as_posix()}"

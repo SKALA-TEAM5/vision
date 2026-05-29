@@ -13,17 +13,29 @@ BOX_COLORS = {
     "red": (220, 38, 38),
     "yellow": (202, 138, 4),
 }
+MIN_ANNOTATED_WIDTH = 960
 
 FONT_CANDIDATES = (
     "/System/Library/Fonts/AppleSDGothicNeo.ttc",
     "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
     "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf",
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
 )
 
 
-def load_label_font(image: Image.Image) -> Union[ImageFont.FreeTypeFont, ImageFont.ImageFont]:
-    font_size = max(26, min(image.width, image.height) // 38)
+def scaled_size(image: Image.Image, ratio: float, minimum: int, maximum: int) -> int:
+    return max(minimum, min(maximum, round(image.width * ratio)))
+
+
+def load_label_font(
+    image: Image.Image,
+    ratio: float = 0.028,
+    minimum: int = 18,
+    maximum: int = 90,
+) -> Union[ImageFont.FreeTypeFont, ImageFont.ImageFont]:
+    font_size = scaled_size(image, ratio=ratio, minimum=minimum, maximum=maximum)
 
     for font_path in FONT_CANDIDATES:
         if Path(font_path).is_file():
@@ -38,27 +50,28 @@ def save_annotated_image(
     output_path: Path,
     safety_net_review: Optional[SafetyNetReview] = None,
 ) -> None:
-    annotated = image.copy()
+    annotated, scale_x, scale_y = prepare_annotated_canvas(image)
     draw = ImageDraw.Draw(annotated)
-    font = load_label_font(image)
-    line_width = max(5, min(image.width, image.height) // 150)
-    padding_x = max(10, line_width * 2)
-    padding_y = max(8, line_width)
+    font = load_label_font(annotated)
+    line_width = scaled_size(annotated, ratio=0.003, minimum=2, maximum=10)
+    padding_x = scaled_size(annotated, ratio=0.012, minimum=7, maximum=28)
+    padding_y = scaled_size(annotated, ratio=0.008, minimum=5, maximum=20)
     placed_labels: list[tuple[float, float, float, float]] = []
 
     if safety_net_review is not None:
+        safety_net_font = load_label_font(annotated, ratio=0.044, minimum=34, maximum=110)
         _draw_safety_net_banner(
             image=annotated,
             draw=draw,
-            font=font,
+            font=safety_net_font,
             review=safety_net_review,
-            padding_x=padding_x,
-            padding_y=padding_y,
+            padding_x=max(padding_x, scaled_size(annotated, ratio=0.018, minimum=12, maximum=36)),
+            padding_y=max(padding_y, scaled_size(annotated, ratio=0.012, minimum=8, maximum=26)),
         )
 
     for detection in detections:
         color = BOX_COLORS.get(detection.box_color, (107, 114, 128))
-        x1, y1, x2, y2 = detection.bbox_xyxy
+        x1, y1, x2, y2 = scale_bbox(detection.bbox_xyxy, scale_x, scale_y)
         label = detection.label or detection.class_code
         suffix = " 검토" if detection.needs_review else ""
         text = f"{label} {detection.confidence:.2f}{suffix}"
@@ -69,11 +82,11 @@ def save_annotated_image(
         text_width = right - left
         text_box_width = text_width + padding_x * 2
         text_box_height = text_height + padding_y * 2
-        text_x = max(0, min(x1, image.width - text_box_width))
+        text_x = max(0, min(x1, annotated.width - text_box_width))
         text_y = y1 - text_box_height - line_width
 
         if text_y < 0:
-            text_y = min(image.height - text_box_height, y1 + line_width)
+            text_y = min(annotated.height - text_box_height, y1 + line_width)
 
         label_box = (
             text_x,
@@ -83,7 +96,7 @@ def save_annotated_image(
         )
         while any(_overlaps(label_box, placed) for placed in placed_labels):
             next_y = label_box[3] + line_width
-            if next_y + text_box_height > image.height:
+            if next_y + text_box_height > annotated.height:
                 break
             label_box = (
                 label_box[0],
@@ -109,6 +122,20 @@ def save_annotated_image(
     annotated.save(output_path)
 
 
+def prepare_annotated_canvas(image: Image.Image) -> tuple[Image.Image, float, float]:
+    if image.width >= MIN_ANNOTATED_WIDTH:
+        return image.copy(), 1.0, 1.0
+
+    scale = MIN_ANNOTATED_WIDTH / image.width
+    target_size = (MIN_ANNOTATED_WIDTH, round(image.height * scale))
+    return image.resize(target_size, Image.Resampling.LANCZOS), scale, scale
+
+
+def scale_bbox(bbox_xyxy: list[float], scale_x: float, scale_y: float) -> tuple[float, float, float, float]:
+    x1, y1, x2, y2 = bbox_xyxy
+    return x1 * scale_x, y1 * scale_y, x2 * scale_x, y2 * scale_y
+
+
 def _draw_safety_net_banner(
     image: Image.Image,
     draw: ImageDraw.ImageDraw,
@@ -122,7 +149,7 @@ def _draw_safety_net_banner(
     left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
     text_width = right - left
     text_height = bottom - top
-    margin = max(12, min(image.width, image.height) // 90)
+    margin = scaled_size(image, ratio=0.018, minimum=7, maximum=24)
     banner_width = min(image.width - margin * 2, text_width + padding_x * 2)
     banner_height = text_height + padding_y * 2
 

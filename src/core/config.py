@@ -22,9 +22,8 @@ class Settings:
             0: "01",
             1: "02",
             2: "05",
-            3: "06",
-            4: "07",
-            5: "08",
+            3: "07",
+            4: "08",
         }
     )
     class_labels: dict[str, dict[str, Union[str, bool]]] = field(

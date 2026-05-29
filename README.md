@@ -78,8 +78,8 @@ make vision-review
     "raw_label": "installed",
     "reason": "이 사진에서는 안전망 설치 여부를 판단하기 어렵습니다."
   },
-  "annotated_image_path": "volumes/vision_results/annotated/sample.annotated.jpg",
-  "annotated_image_url": "/vision-results/annotated/sample.annotated.jpg",
+  "annotated_image_path": "volumes/vision_results/annotated/ppe/sample.annotated.jpg",
+  "annotated_image_url": "/vision-results/annotated/ppe/sample.annotated.jpg",
   "reviews": [
     {
       "equipment": "safety_helmet",

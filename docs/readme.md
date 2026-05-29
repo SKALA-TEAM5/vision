@@ -54,6 +54,7 @@
 - 안전망 점검: `POST /detect/safety-net/source`
 
 컨테이너 실행 기준으로 입력 이미지 디렉토리는 `/data/files`, 결과 이미지 디렉토리는 `/data/vision_results`입니다.
+보호구 결과 이미지는 `/data/vision_results/annotated/ppe`, 안전망 결과 이미지는 `/data/vision_results/annotated/safety-net` 아래에 따로 저장됩니다.
 백엔드는 DB에서 가져온 파일 위치를 `source_uri`로 전달합니다.
 
 ```json
