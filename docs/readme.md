@@ -108,6 +108,139 @@ uv.lock
 - `tests/`: 자동화 테스트
 - `docs/`: 설계 및 작업 문서
 
+## 현재 `src/` 코드 설명
+
+현재 구현 코드는 FastAPI/BentoML 서빙, 모델 추론, 결과 이미지 생성, 로컬 배치 실행으로 나뉩니다.
+
+```text
+src/
+  __init__.py
+  main.py
+  agents/
+    vision_review_agent/
+      __init__.py
+      main.py
+  core/
+    __init__.py
+    config.py
+  schemas/
+    __init__.py
+    vision.py
+  services/
+    __init__.py
+    vision_detection_service.py
+  vision/
+    __init__.py
+    annotation.py
+    image_loader.py
+```
+
+### `src/main.py`
+
+Vision API의 FastAPI entrypoint입니다.
+
+- `/health`: 서버 상태와 모델 파일 존재 여부 확인
+- `/labels`: PPE detector 클래스 코드 확인
+- `/detect/ppe/source`: 파일 경로를 받아 PPE 모델만 실행
+- `/detect/safety-net/source`: 파일 경로를 받아 안전망 모델만 실행
+- `/detect/ppe`: multipart 이미지 업로드로 PPE 모델 실행
+- `/detect/safety-net`: multipart 이미지 업로드로 안전망 모델 실행
+- `/detect`, `/detect/source`: 보호구와 안전망을 같이 실행하는 호환용 API
+
+API에서 받은 `source_uri`를 이미지로 읽고, 추론 결과 JSON에 `annotated_image_path`, `annotated_image_url`을 넣어 반환합니다.
+
+### `src/core/config.py`
+
+환경 변수와 기본 설정을 모아둔 파일입니다.
+
+- 모델 경로: `VISION_MODEL_PATH`, `SAFETY_NET_MODEL_PATH`
+- 입력/출력 경로: `VISION_INPUT_DIR`, `VISION_OUTPUT_DIR`
+- confidence threshold: `VISION_REVIEW_CONF`, `SAFETY_NET_REVIEW_CONF`
+- PPE 클래스 매핑: 모델 class id를 `안전벨트`, `안전화`, `안전모` 라벨로 변환
+
+현재 PPE 모델 클래스는 다음 기준으로 매핑합니다.
+
+```text
+0 -> 01 안전벨트 착용
+1 -> 02 안전벨트 미착용
+2 -> 05 안전화 착용
+3 -> 07 안전모 착용
+4 -> 08 안전모 미착용
+```
+
+### `src/schemas/vision.py`
+
+API 응답과 내부 결과 구조를 정의하는 Pydantic schema 파일입니다.
+
+- `Detection`: bbox 하나에 대한 탐지 결과
+- `EquipmentReview`: 안전모/안전화/안전벨트별 요약 판정
+- `SafetyNetReview`: 안전망 설치 여부 판정
+- `SourceDetectionRequest`: 파일 경로 기반 요청 body
+- `PpeDetectionResponse`: PPE API 응답
+- `SafetyNetDetectionResponse`: 안전망 API 응답
+- `DetectionResponse`: 보호구와 안전망을 같이 실행하는 호환용 응답
+
+백엔드가 DB 로그 테이블에 저장할 JSON 구조는 이 schema를 기준으로 보면 됩니다.
+
+### `src/services/vision_detection_service.py`
+
+실제 모델 추론과 판정 로직이 들어있는 서비스 파일입니다.
+
+- `load_model()`: PPE YOLO 모델 로딩
+- `load_safety_net_model()`: 안전망 classifier 모델 로딩
+- `detect_ppe()`: PPE 모델 실행 후 장비별 판정 생성
+- `detect_safety_net()`: 안전망 모델 실행 후 설치/미설치/판단 어려움 판정 생성
+- `_detect_ppe_boxes()`: YOLO bbox 결과를 `Detection` schema로 변환
+- `_build_reviews()`: 탐지 결과를 안전모/안전화/안전벨트별 요약으로 변환
+- `_classify_safety_net()`: 안전망 classifier 결과를 `installed`, `missing`, `unclear`로 변환
+
+PPE에서 미착용 항목은 부적정으로 처리하고, 착용 항목 confidence가 낮으면 검토 필요로 처리합니다.
+
+### `src/vision/image_loader.py`
+
+이미지를 불러오는 유틸 파일입니다.
+
+- bytes 입력을 RGB 이미지로 변환
+- `/data/files/...` 같은 절대 경로 이미지 로딩
+- 파일명만 들어온 경우 `VISION_INPUT_DIR` 아래에서 이미지 검색
+- http/https URL 이미지 로딩
+
+백엔드가 DB에서 가져온 파일 위치를 `source_uri`로 넘기면, 이 파일의 함수가 실제 이미지를 열어줍니다.
+
+### `src/vision/annotation.py`
+
+결과 이미지를 생성하는 후처리 파일입니다.
+
+- PPE 결과 이미지에 bbox와 라벨 그리기
+- 안전망 결과 이미지에 설치/미설치/판단 어려움 배너 그리기
+- 한글 폰트 로딩
+- 작은 이미지는 결과 이미지용 캔버스를 최소 폭으로 확대해서 라벨 화질 개선
+- bbox 좌표를 결과 이미지 크기에 맞춰 스케일링
+
+JSON의 bbox 좌표는 원본 이미지 기준이고, 결과 이미지에 그릴 때만 시각화용으로 좌표를 확대합니다.
+
+### `src/agents/vision_review_agent/main.py`
+
+로컬 배치 실행용 스크립트입니다.
+
+- `volumes/files` 아래 이미지를 한 번에 처리
+- 파일명 기준으로 `ppe` 또는 `safety-net` 모델 선택
+- `ppe1.jpg`, `ppe2.jpg` 같은 파일은 PPE 모델 실행
+- `safety-net1.jpg`, `safety-net2.jpg` 같은 파일은 안전망 모델 실행
+- 결과 JSON은 `volumes/vision_results/ppe`, `volumes/vision_results/safety-net` 아래 저장
+- 결과 이미지는 `volumes/vision_results/annotated/ppe`, `volumes/vision_results/annotated/safety-net` 아래 저장
+
+로컬에서 전체 샘플을 다시 돌릴 때는 루트에서 다음 명령을 사용합니다.
+
+```bash
+make vision-review
+```
+
+### `__init__.py`
+
+각 디렉토리를 Python package로 인식시키기 위한 파일입니다.
+대부분 비어 있으며, 직접 실행 로직은 들어가지 않습니다.
+
 ## 파일 규칙
 
 - 에이전트 실행 파일은 `main.py`로 통일합니다.
