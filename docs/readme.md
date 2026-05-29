@@ -12,6 +12,7 @@
 - JSON 출력 스키마
 - 샘플 이미지 및 실험 예제
 - BentoML 기반 모델 서빙 설정
+- uv 기반 Python 의존성 관리
 
 현재 모델:
 
@@ -89,6 +90,8 @@ tests/
 docs/
 service.py
 bentofile.yaml
+pyproject.toml
+uv.lock
 ```
 
 ## 폴더 설명

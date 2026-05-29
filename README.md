@@ -21,6 +21,8 @@ src/
   main.py
 service.py
 bentofile.yaml
+pyproject.toml
+uv.lock
 ```
 
 ## Run
@@ -41,6 +43,8 @@ VISION_MODEL_DEVICE=auto
 VISION_REVIEW_CONF=0.50
 SAFETY_NET_REVIEW_CONF=0.70
 ```
+
+의존성은 `pyproject.toml`과 `uv.lock` 기준으로 설치합니다.
 
 ```bash
 make vision-venv
@@ -109,6 +113,7 @@ make vision-up
 ```
 
 `make vision-up`은 Dockerfile을 사용해 BentoML 서버를 실행합니다.
+Dockerfile도 `uv sync --frozen`으로 `uv.lock`에 고정된 의존성을 설치합니다.
 FastAPI 문서는 그대로 아래 URL에서 확인할 수 있습니다.
 
 ```text
