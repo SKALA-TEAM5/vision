@@ -12,6 +12,10 @@ from src.schemas.vision import (
     PpeDetectionResponse,
     SafetyNetDetectionResponse,
     SourceDetectionRequest,
+    VisionReviewPhoto,
+    VisionReviewRequest,
+    VisionReviewResponse,
+    VisionReviewTodo,
 )
 from src.services.vision_detection_service import VisionDetectionService
 from src.vision.annotation import save_annotated_image
@@ -38,6 +42,7 @@ def health() -> dict[str, Any]:
         "safety_net_model_exists": settings.safety_net_model_path.exists(),
         "safety_net_model_is_file": settings.safety_net_model_path.is_file(),
         "device": settings.model_device,
+        "public_base_url": settings.public_base_url or None,
     }
 
 
@@ -153,6 +158,83 @@ async def detect_safety_net_source(request: SourceDetectionRequest) -> SafetyNet
     return response
 
 
+@app.post(
+    "/vision/review",
+    response_model=VisionReviewResponse,
+    summary="Orchestrator 전용 현장사진 검토",
+    description=(
+        "FastAPI Orchestrator가 여러 현장사진의 presigned URL을 전달하면 "
+        "Vision Agent가 PPE/안전망 검토 결과와 보완 필요 todos를 반환합니다. "
+        "부적정, 검토 필요, 판단 불가는 result_code=hil로 내려가고, "
+        "이미지 다운로드 실패나 모델 오류만 result_code=fail로 내려갑니다."
+    ),
+)
+async def vision_review(request: VisionReviewRequest) -> VisionReviewResponse:
+    results: list[dict[str, Any]] = []
+    todos: list[VisionReviewTodo] = []
+    model_name = f"{settings.model_name},{settings.safety_net_model_name}"
+
+    for photo in request.photos:
+        try:
+            image = _load_source_image(photo.presigned_url)
+            review_type = _review_type(photo)
+            result = _review_photo(photo, image, review_type)
+        except Exception as exc:
+            results.append(
+                {
+                    "file_id": photo.file_id,
+                    "original_filename": photo.original_filename,
+                    "storage_key": photo.storage_key,
+                    "status": "error",
+                    "is_appropriate": None,
+                    "message": str(exc),
+                }
+            )
+            return VisionReviewResponse(
+                status_code="fail",
+                result_code="fail",
+                reason=f"현장사진 검토 중 오류가 발생했습니다: {photo.original_filename}",
+                model_name=model_name,
+                todos=todos,
+                details={
+                    "summary": "현장사진 검토 실패",
+                    "project_id": request.project_id,
+                    "usage_statement_id": request.usage_statement_id,
+                    "results": results,
+                },
+            )
+
+        results.append(result)
+        if result["is_appropriate"] is not True:
+            todos.append(
+                VisionReviewTodo(
+                    file_id=photo.file_id,
+                    reason=result["message"],
+                )
+            )
+
+    if todos:
+        result_code = "hil"
+        reason = f"현장사진 {len(request.photos)}건 중 {len(todos)}건 보완 필요"
+    else:
+        result_code = "success"
+        reason = f"현장사진 {len(request.photos)}건 모두 적정"
+
+    return VisionReviewResponse(
+        status_code="success",
+        result_code=result_code,
+        reason=reason,
+        model_name=model_name,
+        todos=todos,
+        details={
+            "summary": "현장사진 검토 완료",
+            "project_id": request.project_id,
+            "usage_statement_id": request.usage_statement_id,
+            "results": results,
+        },
+    )
+
+
 async def _load_upload_image(file: UploadFile):
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="file must be an image")
@@ -195,11 +277,97 @@ def _source_name(source_uri: str) -> str:
 
 def _annotated_image_url(output_path: Path) -> str:
     relative_path = output_path.relative_to(settings.output_dir)
-    return f"/vision-results/{relative_path.as_posix()}"
+    return _public_url(f"/vision-results/{relative_path.as_posix()}")
 
 
 def _source_image_url(source_uri: str) -> str:
     parsed = urlparse(source_uri)
     if parsed.scheme in ("http", "https"):
         return source_uri
-    return f"/vision-files/{Path(source_uri).name}"
+    return _public_url(f"/vision-files/{Path(source_uri).name}")
+
+
+def _public_url(path: str) -> str:
+    if not settings.public_base_url:
+        return path
+    return f"{settings.public_base_url}{path}"
+
+
+def _review_type(photo: VisionReviewPhoto) -> str:
+    text = " ".join(
+        value or ""
+        for value in (
+            photo.evidence_type_code,
+            photo.storage_key,
+            photo.original_filename,
+        )
+    ).lower()
+
+    if any(keyword in text for keyword in ("safety-net", "safety_net", "safetynet", "안전망")):
+        return "safety-net"
+
+    if any(keyword in text for keyword in ("ppe", "protective", "helmet", "안전모", "안전화", "안전벨트")):
+        return "ppe"
+
+    return "combined"
+
+
+def _review_photo(photo: VisionReviewPhoto, image: Any, review_type: str) -> dict[str, Any]:
+    if review_type == "ppe":
+        response = vision_service.detect_ppe(image)
+        source_id = str(photo.file_id)
+        response.source_id = source_id
+        response.source_uri = photo.presigned_url
+        response.source_image_url = _source_image_url(photo.presigned_url)
+        return _photo_result(photo, review_type, response.status, response.is_appropriate, response.message, response)
+
+    if review_type == "safety-net":
+        response = vision_service.detect_safety_net(image)
+        source_id = str(photo.file_id)
+        response.source_id = source_id
+        response.source_uri = photo.presigned_url
+        response.source_image_url = _source_image_url(photo.presigned_url)
+        output_path = _named_annotated_output_path(source_id, "safety-net")
+        save_annotated_image(image, [], output_path, response.safety_net_review)
+        response.annotated_image_path = str(output_path)
+        response.annotated_image_url = _annotated_image_url(output_path)
+        return _photo_result(photo, review_type, response.status, response.is_appropriate, response.message, response)
+
+    response = vision_service.detect(image)
+    source_id = str(photo.file_id)
+    response.source_id = source_id
+    response.source_uri = photo.presigned_url
+    response.source_image_url = _source_image_url(photo.presigned_url)
+    return _photo_result(
+        photo,
+        review_type,
+        response.overall_status,
+        response.is_appropriate,
+        response.message,
+        response,
+    )
+
+
+def _photo_result(
+    photo: VisionReviewPhoto,
+    review_type: str,
+    status: str,
+    is_appropriate: bool | None,
+    message: str,
+    response: Any,
+) -> dict[str, Any]:
+    payload = response.model_dump()
+    return {
+        "file_id": photo.file_id,
+        "original_filename": photo.original_filename,
+        "storage_key": photo.storage_key,
+        "evidence_type_code": photo.evidence_type_code,
+        "review_type": review_type,
+        "status": status,
+        "is_appropriate": is_appropriate,
+        "message": message,
+        "model_name": payload.get("model_name"),
+        "source_image_url": payload.get("source_image_url"),
+        "annotated_image_url": payload.get("annotated_image_url"),
+        "result": payload,
+    }

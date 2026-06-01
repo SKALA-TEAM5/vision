@@ -17,6 +17,7 @@ class Settings:
     safety_net_confidence_threshold: float = float(os.getenv("SAFETY_NET_REVIEW_CONF", "0.70"))
     input_dir: Path = Path(os.getenv("VISION_INPUT_DIR", "volumes/files"))
     output_dir: Path = Path(os.getenv("VISION_OUTPUT_DIR", "volumes/vision_results"))
+    public_base_url: str = os.getenv("VISION_PUBLIC_BASE_URL", "").rstrip("/")
     class_names: dict[int, str] = field(
         default_factory=lambda: {
             0: "01",

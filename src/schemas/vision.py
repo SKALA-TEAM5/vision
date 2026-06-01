@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Any, Literal, Optional
 
 
 class Detection(BaseModel):
@@ -86,3 +86,34 @@ class DetectionResponse(BaseModel):
     annotated_image_url: Optional[str] = None
     reviews: list[EquipmentReview]
     detections: list[Detection]
+
+
+class VisionReviewPhoto(BaseModel):
+    file_id: int
+    original_filename: str
+    storage_key: str
+    evidence_type_code: Optional[str] = None
+    mime_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+    presigned_url: str
+
+
+class VisionReviewRequest(BaseModel):
+    project_id: int
+    usage_statement_id: int
+    photos: list[VisionReviewPhoto]
+
+
+class VisionReviewTodo(BaseModel):
+    file_id: int
+    reason: str
+
+
+class VisionReviewResponse(BaseModel):
+    status_code: Literal["success", "fail"]
+    result_code: Literal["success", "hil", "fail"]
+    reason: str
+    token: int = 0
+    model_name: str
+    todos: list[VisionReviewTodo]
+    details: dict[str, Any]

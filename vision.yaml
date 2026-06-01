@@ -5,8 +5,8 @@ info:
   description: |
     건설 현장 이미지를 입력받아 보호구 착용 상태와 안전망 설치 상태를 판단하는 Vision API입니다.
 
-    DB에는 원본 이미지 경로, Vision API의 JSON 결과, 결과 이미지 경로 또는 URL을 저장합니다.
-    보호구 결과 이미지는 bbox와 라벨이 그려진 이미지입니다.
+    DB에는 원본 이미지 경로, Vision API의 JSON 결과, 안전망 결과 이미지 경로 또는 URL을 저장합니다.
+    보호구는 원본 이미지와 JSON bbox를 프론트에서 조합해 표시합니다.
     안전망 결과 이미지는 설치/미설치/판단 어려움 배너가 그려진 이미지입니다.
 
     ## 백엔드 연동 흐름
@@ -15,12 +15,14 @@ info:
     Backend
       1. DB에서 원본 이미지 주소 조회
       2. 점검 항목에 따라 POST /detect/ppe/source 또는 /detect/safety-net/source 로 source_uri 전달
+         또는 Orchestrator에서 POST /vision/review 로 여러 presigned_url 전달
       3. Vision API JSON 응답 수신
-      4. DB 로그 테이블에 Vision JSON과 annotated_image_url 저장
+      4. DB 로그 테이블에 Vision JSON과 필요한 이미지 URL 저장
 
     Frontend
-      1. DB에서 결과 이미지 URL과 Vision JSON 조회
-      2. 결과 이미지를 화면에 표시하고, 필요하면 JSON 메시지를 함께 표시
+      1. DB에서 원본 이미지 URL, 결과 이미지 URL, Vision JSON 조회
+      2. PPE는 원본 이미지 위에 JSON bbox를 렌더링
+      3. 안전망은 결과 이미지 URL을 표시
     ```
 
 servers:
@@ -298,8 +300,182 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /vision/review:
+    post:
+      tags:
+        - Vision
+      summary: Orchestrator 전용 현장사진 검토
+      description: |
+        FastAPI Orchestrator가 여러 현장사진의 presigned URL을 전달하면 Vision Agent가 사진별 PPE/안전망 검토를 수행하고 Orchestrator용 결과를 반환합니다.
+
+        `presigned_url`은 Vision 컨테이너가 즉시 다운로드할 수 있는 주소여야 합니다.
+        Docker 내부 MinIO 주소는 `localhost:9000`이 아니라 `http://minio:9000` 같은 서비스명을 사용해야 합니다.
+
+        `annotated_image_url`은 `VISION_PUBLIC_BASE_URL`이 설정된 경우 프론트가 접근할 수 있는 절대 URL로 반환됩니다.
+
+        `evidence_type_code`, `storage_key`, `original_filename`에 `ppe` 또는 `안전망/safety-net` 힌트가 있으면 해당 모델만 실행합니다.
+        힌트가 없으면 호환용으로 PPE detector와 안전망 classifier를 함께 실행합니다.
+
+        판정 결과가 부적정, 검토 필요, 판단 불가인 경우 `status_code=success`, `result_code=hil`로 반환합니다.
+        이미지 다운로드 실패 또는 모델 오류 같은 시스템 오류만 `status_code=fail`, `result_code=fail`로 반환합니다.
+      operationId: reviewVisionForOrchestrator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VisionReviewRequest"
+            example:
+              project_id: 1
+              usage_statement_id: 123
+              photos:
+                - file_id: 10
+                  original_filename: 현장사진.jpg
+                  storage_key: projects/1/site-photo/a.jpg
+                  evidence_type_code: site_photo
+                  mime_type: image/jpeg
+                  size_bytes: 12345
+                  presigned_url: http://minio/bucket/projects/1/site-photo/a.jpg?signature=...
+      responses:
+        "200":
+          description: Orchestrator용 Vision 검토 결과
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VisionReviewResponse"
+              example:
+                status_code: success
+                result_code: hil
+                reason: 현장사진 2건 중 1건 보완 필요
+                token: 0
+                model_name: ppe-detector,safety-net-classifier
+                todos:
+                  - file_id: 10
+                    reason: 안전모 항목이 확인되지 않았습니다.
+                details:
+                  summary: 현장사진 검토 완료
+                  project_id: 1
+                  usage_statement_id: 123
+                  results:
+                    - file_id: 10
+                      original_filename: 현장사진.jpg
+                      storage_key: projects/1/site-photo/a.jpg
+                      evidence_type_code: site_photo
+                      review_type: combined
+                      status: needs_review
+                      is_appropriate: null
+                      message: 안전모 항목이 확인되지 않았습니다.
+                      model_name: ppe-detector
+                      source_image_url: http://minio/bucket/projects/1/site-photo/a.jpg?signature=...
+                      annotated_image_url: null
+
 components:
   schemas:
+    VisionReviewRequest:
+      type: object
+      required:
+        - project_id
+        - usage_statement_id
+        - photos
+      properties:
+        project_id:
+          type: integer
+          example: 1
+        usage_statement_id:
+          type: integer
+          example: 123
+        photos:
+          type: array
+          items:
+            $ref: "#/components/schemas/VisionReviewPhoto"
+
+    VisionReviewPhoto:
+      type: object
+      required:
+        - file_id
+        - original_filename
+        - storage_key
+        - presigned_url
+      properties:
+        file_id:
+          type: integer
+          example: 10
+        original_filename:
+          type: string
+          example: 현장사진.jpg
+        storage_key:
+          type: string
+          example: projects/1/site-photo/a.jpg
+        evidence_type_code:
+          type: string
+          nullable: true
+          example: site_photo
+        mime_type:
+          type: string
+          nullable: true
+          example: image/jpeg
+        size_bytes:
+          type: integer
+          nullable: true
+          example: 12345
+        presigned_url:
+          type: string
+          description: Vision API가 직접 다운로드할 수 있는 presigned URL
+          example: http://minio/bucket/projects/1/site-photo/a.jpg?signature=...
+
+    VisionReviewTodo:
+      type: object
+      required:
+        - file_id
+        - reason
+      properties:
+        file_id:
+          type: integer
+          example: 10
+        reason:
+          type: string
+          example: 안전모 항목이 확인되지 않았습니다.
+
+    VisionReviewResponse:
+      type: object
+      required:
+        - status_code
+        - result_code
+        - reason
+        - token
+        - model_name
+        - todos
+        - details
+      properties:
+        status_code:
+          type: string
+          enum:
+            - success
+            - fail
+        result_code:
+          type: string
+          enum:
+            - success
+            - hil
+            - fail
+          description: hil은 보완 필요, 부적정, 판단 불가를 의미합니다.
+        reason:
+          type: string
+          example: 현장사진 2건 중 1건 보완 필요
+        token:
+          type: integer
+          example: 0
+        model_name:
+          type: string
+          example: ppe-detector,safety-net-classifier
+        todos:
+          type: array
+          items:
+            $ref: "#/components/schemas/VisionReviewTodo"
+        details:
+          type: object
+          additionalProperties: true
+
     SourceDetectionRequest:
       type: object
       required:
@@ -328,6 +504,7 @@ components:
         - safety_net_model_exists
         - safety_net_model_is_file
         - device
+        - public_base_url
       properties:
         status:
           type: string
@@ -359,6 +536,11 @@ components:
         device:
           type: string
           example: auto
+        public_base_url:
+          type: string
+          nullable: true
+          description: annotated_image_url 절대 URL 생성에 사용하는 기준 URL
+          example: http://localhost:8002
 
     PpeDetectionResponse:
       type: object
@@ -403,11 +585,11 @@ components:
         annotated_image_path:
           type: string
           nullable: true
-          description: bbox와 라벨이 그려진 결과 이미지 파일 경로
+          description: PPE는 프론트에서 원본 이미지와 bbox JSON을 조합하므로 기본적으로 null입니다.
         annotated_image_url:
           type: string
           nullable: true
-          description: bbox와 라벨이 그려진 결과 이미지 URL. DB 로그 테이블 저장 대상입니다.
+          description: PPE는 프론트에서 원본 이미지와 bbox JSON을 조합하므로 기본적으로 null입니다.
         reviews:
           type: array
           description: 안전모, 안전화, 안전벨트 장비별 요약 판정
@@ -470,8 +652,8 @@ components:
         annotated_image_url:
           type: string
           nullable: true
-          description: 안전망 상태 배너가 그려진 결과 이미지 URL. DB 로그 테이블 저장 대상입니다.
-          example: /vision-results/annotated/image_67890.safety-net.annotated.jpg
+          description: 안전망 상태 배너가 그려진 결과 이미지 URL. VISION_PUBLIC_BASE_URL이 있으면 절대 URL입니다.
+          example: http://localhost:8002/vision-results/annotated/image_67890.safety-net.annotated.jpg
         safety_net_review:
           $ref: "#/components/schemas/SafetyNetReview"
 
@@ -537,7 +719,7 @@ components:
         annotated_image_url:
           type: string
           nullable: true
-          description: 결과 이미지 URL. DB 로그 테이블 저장 대상입니다.
+          description: 결과 이미지 URL. VISION_PUBLIC_BASE_URL이 있으면 절대 URL입니다.
         reviews:
           type: array
           description: 장비별 요약 판정
