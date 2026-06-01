@@ -8,7 +8,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     VISION_MODEL_PATH=/models/ppe-detector.pt \
     SAFETY_NET_MODEL_PATH=/models/safety-net-classifier.pt \
     VISION_INPUT_DIR=/data/files \
-    VISION_OUTPUT_DIR=/data/vision_results
+    VISION_OUTPUT_DIR=/data/vision_results \
+    BENTOML_HOST=0.0.0.0 \
+    BENTOML_PORT=8002
 
 WORKDIR /app
 
@@ -27,4 +29,4 @@ COPY bentofile.yaml ./bentofile.yaml
 
 EXPOSE 8002
 
-CMD ["bentoml", "serve", "service:VisionService", "--host", "0.0.0.0", "--port", "8002"]
+CMD ["bentoml", "serve", "--host", "0.0.0.0", "--port", "8002", "service:VisionService"]
