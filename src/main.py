@@ -24,6 +24,7 @@ from src.vision.image_loader import load_rgb_image, load_rgb_image_from_uri
 
 app = FastAPI(title="Safety Vision API", version="0.1.0")
 vision_service = VisionDetectionService(settings)
+settings.input_dir.mkdir(parents=True, exist_ok=True)
 settings.output_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/vision-results", StaticFiles(directory=str(settings.output_dir)), name="vision-results")
 app.mount("/vision-files", StaticFiles(directory=str(settings.input_dir)), name="vision-files")
