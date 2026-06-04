@@ -19,6 +19,16 @@
 - `models/ppe-detector.pt`: 안전모, 안전화, 안전벨트 착용/미착용 bbox detector
 - `models/safety-net-classifier.pt`: 안전망 설치 여부 classifier
 
+Kubernetes 배포에서는 모델 파일을 이 레포에 커밋하지 않습니다.
+모델은 MinIO에 저장하고, `SKALA-TEAM5/deploy` 레포의 `team5-vision` Deployment initContainer가 Pod 시작 시 `/models`로 내려받습니다.
+
+```text
+safety-files/models/vision/ppe-detector.pt
+safety-files/models/vision/safety-net-classifier.pt
+```
+
+이 레포는 Vision 코드와 Docker 이미지 빌드만 담당하고, Kubernetes manifest는 `SKALA-TEAM5/deploy` 레포의 `k8s/vision`에서 관리합니다.
+
 ## 입력 / 출력
 
 입력:
