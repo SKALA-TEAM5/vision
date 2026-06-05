@@ -1,5 +1,8 @@
 # Vision AI Workspace
 
+> 활성 소스와 이미지 빌드 workflow는 `SKALA-TEAM5/fastapi` 저장소의 `vision/` 디렉터리로 이전되었습니다.
+> 이 저장소는 이전 이력 확인용으로 유지하며, 신규 변경은 FastAPI 저장소에서 진행합니다.
+
 사진 입력을 받아 적정성 여부를 판단하고, 결과를 JSON으로 반환하는 Vision AI 전용 작업 공간입니다.
 
 ## 범위
